@@ -69,8 +69,16 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
         return Object.keys(newErrors).length === 0;
     };
 
+    // Add this to your RegisterScreen.tsx handleRegister function
     const handleRegister = async () => {
         if (!validateForm()) return;
+
+        console.log('📤 Sending registration data:', {
+            name: formData.name.trim(),
+            email: formData.email.toLowerCase(),
+            phone: formData.phone.trim() || undefined,
+            familyCode: formData.familyCode.trim() || undefined,
+        });
 
         try {
             const userData = {
@@ -81,9 +89,24 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
                 familyCode: formData.familyCode.trim() || undefined,
             };
 
-            await dispatch(registerUser(userData)).unwrap();
+            console.log('🚀 Dispatching register action...');
+            const result = await dispatch(registerUser(userData)).unwrap();
+            console.log('✅ Registration successful:', result);
+
         } catch (error: any) {
-            Alert.alert('Registration Failed', error || 'Please try again.');
+            console.log('🔴 Registration Rejected:', error);
+
+            let errorMessage = 'Registration failed';
+
+            if (error.includes('Network Error')) {
+                errorMessage = 'Cannot connect to server. Please check if the backend is running.';
+            } else if (error.includes('timeout')) {
+                errorMessage = 'Request timed out. Please try again.';
+            } else {
+                errorMessage = error || 'Registration failed';
+            }
+
+            Alert.alert('Registration Failed', errorMessage);
         }
     };
 

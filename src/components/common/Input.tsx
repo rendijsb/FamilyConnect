@@ -1,4 +1,3 @@
-// src/components/common/Input.tsx
 import React, { useState } from 'react';
 import {
     View,
@@ -7,6 +6,8 @@ import {
     StyleSheet,
     TextInputProps,
     ViewStyle,
+    TouchableOpacity,
+    Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
@@ -18,6 +19,7 @@ interface InputProps extends TextInputProps {
     rightIcon?: string;
     onRightIconPress?: () => void;
     containerStyle?: ViewStyle;
+    isPassword?: boolean;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -28,9 +30,49 @@ export const Input: React.FC<InputProps> = ({
                                                 onRightIconPress,
                                                 containerStyle,
                                                 style,
+                                                isPassword = false,
+                                                secureTextEntry: propSecureTextEntry,
                                                 ...props
                                             }) => {
     const [isFocused, setIsFocused] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
+
+    const isSecureField = isPassword || propSecureTextEntry;
+    const secureTextEntry = isSecureField && !showPassword;
+
+    const handleRightIconPress = () => {
+        if (isPassword || propSecureTextEntry) {
+            setShowPassword(!showPassword);
+        } else if (onRightIconPress) {
+            onRightIconPress();
+        }
+    };
+
+    const finalRightIcon = (isPassword || propSecureTextEntry)
+        ? (showPassword ? 'visibility-off' : 'visibility')
+        : rightIcon;
+
+    const getAutoCompleteType = () => {
+        if (isPassword || propSecureTextEntry) {
+            return Platform.OS === 'android' ? 'password' : 'password';
+        }
+        if (props.keyboardType === 'email-address') {
+            return 'email';
+        }
+        return 'off';
+    };
+
+    const getTextContentType = () => {
+        if (Platform.OS === 'ios') {
+            if (isPassword || propSecureTextEntry) {
+                return 'password' as const;
+            }
+            if (props.keyboardType === 'email-address') {
+                return 'emailAddress' as const;
+            }
+        }
+        return 'none' as const;
+    };
 
     return (
         <View style={[styles.container, containerStyle]}>
@@ -48,16 +90,24 @@ export const Input: React.FC<InputProps> = ({
                     onFocus={() => setIsFocused(true)}
                     onBlur={() => setIsFocused(false)}
                     placeholderTextColor={colors.textSecondary}
+                    secureTextEntry={secureTextEntry}
+                    // Fix autocomplete issues
+                    autoComplete={getAutoCompleteType() as any}
+                    textContentType={getTextContentType()}
+                    autoCorrect={false}
+                    autoCapitalize={isSecureField ? 'none' : props.autoCapitalize}
+                    // Prevent autocomplete yellow line
+                    importantForAutofill="no"
                     {...props}
                 />
-                {rightIcon && (
-                    <Icon
-                        name={rightIcon}
-                        size={20}
-                        color={colors.textSecondary}
-                        style={styles.rightIcon}
-                        onPress={onRightIconPress}
-                    />
+                {finalRightIcon && (
+                    <TouchableOpacity onPress={handleRightIconPress} style={styles.rightIconContainer}>
+                        <Icon
+                            name={finalRightIcon}
+                            size={20}
+                            color={colors.textSecondary}
+                        />
+                    </TouchableOpacity>
                 )}
             </View>
             {error && <Text style={styles.errorText}>{error}</Text>}
@@ -83,24 +133,39 @@ const styles = StyleSheet.create({
         borderRadius: borderRadius.md,
         backgroundColor: colors.surface,
         paddingHorizontal: spacing.md,
+        minHeight: 48,
+        // Prevent autocomplete overlay issues
+        position: 'relative',
+        overflow: 'hidden',
     },
     focused: {
         borderColor: colors.primary,
+        borderWidth: 2,
     },
     error: {
         borderColor: colors.error,
     },
     input: {
         flex: 1,
-        paddingVertical: spacing.md,
+        paddingVertical: spacing.sm,
         fontSize: typography.sizes.md,
         color: colors.text,
+        // Fix password input issues
+        textAlignVertical: 'center',
+        includeFontPadding: false,
+        // Additional fixes for autocomplete
+        ...(Platform.OS === 'android' && {
+            fontFamily: 'Roboto',
+        }),
     },
     leftIcon: {
         marginRight: spacing.sm,
     },
-    rightIcon: {
+    rightIconContainer: {
+        padding: spacing.xs,
         marginLeft: spacing.sm,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     errorText: {
         fontSize: typography.sizes.xs,

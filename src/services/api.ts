@@ -1,7 +1,19 @@
-// src/services/api.ts - FIXED VERSION
-import axios, {AxiosResponse} from 'axios';
+// src/services/api.ts - Platform-Aware Version
+import axios from 'axios';
+import { Platform } from 'react-native';
 
-const API_BASE_URL = 'http://10.0.2.2:3000/api';
+// Platform-specific API URL
+const getApiUrl = () => {
+    if (Platform.OS === 'ios') {
+        return 'http://localhost:3000/api';
+    } else {
+        return 'http://10.0.2.2:3000/api';
+    }
+};
+
+const API_BASE_URL = getApiUrl();
+
+console.log('🌐 API Base URL:', API_BASE_URL); // For debugging
 
 // Create axios instance
 const apiClient = axios.create({
@@ -29,16 +41,11 @@ export interface AuthResponse {
 // Request interceptor to add auth token
 apiClient.interceptors.request.use(
     (config) => {
-        // We'll add token from redux store later
-        const token = null; // TODO: Get from store
-
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-
+        console.log('📤 API Request:', config.method?.toUpperCase(), config.url);
         return config;
     },
     (error) => {
+        console.log('❌ Request Error:', error);
         return Promise.reject(error);
     }
 );
@@ -46,12 +53,19 @@ apiClient.interceptors.request.use(
 // Response interceptor for error handling
 apiClient.interceptors.response.use(
     (response) => {
-        return response.data; // Return just the data
+        console.log('✅ API Response:', response.status, response.config.url);
+        return response;
     },
     (error) => {
+        console.log('❌ API Error:', {
+            url: error.config?.url,
+            status: error.response?.status,
+            message: error.message,
+            data: error.response?.data
+        });
+
         if (error.response?.status === 401) {
-            // Token expired or invalid, could logout user here
-            console.log('Authentication error');
+            console.log('🔐 Authentication error');
         }
         return Promise.reject(error);
     }
@@ -59,9 +73,9 @@ apiClient.interceptors.response.use(
 
 // Auth API
 export const authAPI = {
-    login: async (email: string, password: string): Promise<AxiosResponse<any>> => {
+    login: async (email: string, password: string): Promise<AuthResponse> => {
         const response = await apiClient.post('/auth/login', { email, password });
-        return response;
+        return response.data;
     },
 
     register: async (userData: {
@@ -70,13 +84,14 @@ export const authAPI = {
         name: string;
         phone?: string;
         familyCode?: string;
-    }): Promise<AxiosResponse<any>> => {
+    }): Promise<AuthResponse> => {
+        console.log('📤 Sending registration data:', userData);
         const response = await apiClient.post('/auth/register', userData);
-        return response;
+        return response.data;
     },
 
     forgotPassword: async (email: string) => {
         const response = await apiClient.post('/auth/forgot-password', { email });
-        return response;
+        return response.data;
     },
 };

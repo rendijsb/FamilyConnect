@@ -1,6 +1,5 @@
-import {createAsyncThunk, createSlice, PayloadAction} from '@reduxjs/toolkit';
-import {authAPI} from '../../services/api';
-import {AxiosResponse} from "axios";
+import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { authAPI, AuthResponse } from '../../services/api';
 
 export interface User {
     id: string;
@@ -33,7 +32,7 @@ export const loginUser = createAsyncThunk(
     'auth/loginUser',
     async ({ email, password }: { email: string; password: string }, { rejectWithValue }) => {
         try {
-            const response: AxiosResponse<any> = await authAPI.login(email, password);
+            const response: AuthResponse = await authAPI.login(email, password);
             return response;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Login failed');
@@ -51,7 +50,8 @@ export const registerUser = createAsyncThunk(
         familyCode?: string;
     }, { rejectWithValue }) => {
         try {
-            return await authAPI.register(userData);
+            const response: AuthResponse = await authAPI.register(userData);
+            return response;
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.error || 'Registration failed');
         }
