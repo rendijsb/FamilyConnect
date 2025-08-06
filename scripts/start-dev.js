@@ -85,23 +85,6 @@ MAX_FILE_SIZE="10mb"`;
   }
 };
 
-// Check and install dependencies
-const checkDependencies = async () => {
-  log('yellow', '📦 Checking dependencies...');
-  
-  if (!fileExists('node_modules')) {
-    log('yellow', '📦 Installing React Native dependencies...');
-    await runCommand('npm', ['install']);
-  }
-
-  if (!fileExists('backend/node_modules')) {
-    log('yellow', '📦 Installing Backend dependencies...');
-    process.chdir('backend');
-    await runCommand('npm', ['install']);
-    process.chdir('..');
-  }
-};
-
 // Run command and return promise
 const runCommand = (command, args, options = {}) => {
   return new Promise((resolve, reject) => {
@@ -126,39 +109,55 @@ const runCommand = (command, args, options = {}) => {
   });
 };
 
-// Start database
-const startDatabase = async () => {
-  log('yellow', '🐘 Setting up database...');
+// Check and install dependencies
+const checkDependencies = async () => {
+  log('yellow', '📦 Checking dependencies...');
   
-  try {
-    // Try to start PostgreSQL with Docker
-    await runCommand('docker', [
-      'run', '--name', 'familyconnect-postgres',
-      '-e', 'POSTGRES_PASSWORD=postgres',
-      '-e', 'POSTGRES_DB=familyconnect',
-      '-p', '5432:5432', '-d', 'postgres:13'
-    ], { stdio: 'ignore' });
-    
-    log('green', '✅ PostgreSQL started with Docker');
-    
-    // Wait for database to be ready
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-  } catch (error) {
-    // Docker might not be available or container might already exist
-    log('yellow', '⚠️  Docker not available or PostgreSQL already running');
+  if (!fileExists('node_modules')) {
+    log('yellow', '📦 Installing React Native dependencies...');
+    await runCommand('npm', ['install']);
   }
 
-  // Setup database
-  try {
+  if (!fileExists('backend/node_modules')) {
+    log('yellow', '📦 Installing Backend dependencies...');
     process.chdir('backend');
-    await runCommand('npm', ['run', 'db:generate'], { stdio: 'ignore' });
-    await runCommand('npm', ['run', 'db:migrate'], { stdio: 'ignore' });
+    await runCommand('npm', ['install']);
     process.chdir('..');
-    log('green', '✅ Database setup complete');
+  }
+};
+
+// Start database
+const startDatabase = async () => {
+  log('yellow', '🐘 Checking database...');
+  
+  try {
+    // Try to connect to existing PostgreSQL
+    const { spawn } = require('child_process');
+    const testConnection = spawn('psql', ['-h', 'localhost', '-p', '5432', '-U', 'postgres', '-l'], {
+      stdio: 'ignore'
+    });
+    
+    testConnection.on('close', async (code) => {
+      if (code === 0) {
+        log('green', '✅ PostgreSQL is running');
+        
+        // Setup database
+        try {
+          process.chdir('backend');
+          await runCommand('npm', ['run', 'db:generate'], { stdio: 'pipe' });
+          await runCommand('npm', ['run', 'db:migrate'], { stdio: 'pipe' });
+          process.chdir('..');
+          log('green', '✅ Database setup complete');
+        } catch (error) {
+          log('yellow', '⚠️  Database setup failed. Please ensure PostgreSQL is running.');
+        }
+      } else {
+        log('yellow', '⚠️  PostgreSQL not detected. Please start PostgreSQL manually.');
+      }
+    });
+    
   } catch (error) {
-    log('red', '❌ Database setup failed. Please ensure PostgreSQL is running.');
-    log('yellow', 'You can start PostgreSQL manually or install Docker to use the automated setup.');
+    log('yellow', '⚠️  Could not detect PostgreSQL. Please ensure it\'s installed and running.');
   }
 };
 
@@ -196,7 +195,7 @@ const startBackend = () => {
 const startMetro = () => {
   log('green', '📱 Starting Metro bundler...');
   
-  const metroProcess = spawn('npm', ['start'], {
+  const metroProcess = spawn('npx', ['react-native', 'start'], {
     stdio: 'pipe',
     shell: isWindows,
     detached: !isWindows
@@ -267,99 +266,3 @@ main().catch(error => {
   log('red', `❌ Fatal error: ${error.message}`);
   process.exit(1);
 });
-
-// scripts/check-setup.js
-const fs = require('fs');
-const { execSync } = require('child_process');
-
-const checkSetup = () => {
-  console.log('🔍 Checking FamilyConnect setup...\n');
-
-  const checks = [
-    {
-      name: 'Node.js',
-      check: () => {
-        try {
-          const version = execSync('node --version', { encoding: 'utf8' });
-          return { success: true, message: `Version: ${version.trim()}` };
-        } catch {
-          return { success: false, message: 'Not installed' };
-        }
-      }
-    },
-    {
-      name: 'npm',
-      check: () => {
-        try {
-          const version = execSync('npm --version', { encoding: 'utf8' });
-          return { success: true, message: `Version: ${version.trim()}` };
-        } catch {
-          return { success: false, message: 'Not installed' };
-        }
-      }
-    },
-    {
-      name: 'React Native dependencies',
-      check: () => {
-        const exists = fs.existsSync('node_modules');
-        return {
-          success: exists,
-          message: exists ? 'Installed' : 'Run: npm install'
-        };
-      }
-    },
-    {
-      name: 'Backend dependencies',
-      check: () => {
-        const exists = fs.existsSync('backend/node_modules');
-        return {
-          success: exists,
-          message: exists ? 'Installed' : 'Run: cd backend && npm install'
-        };
-      }
-    },
-    {
-      name: 'Environment files',
-      check: () => {
-        const frontendEnv = fs.existsSync('.env');
-        const backendEnv = fs.existsSync('backend/.env');
-        const both = frontendEnv && backendEnv;
-        return {
-          success: both,
-          message: both ? 'Present' : 'Missing - run npm run dev to create'
-        };
-      }
-    },
-    {
-      name: 'Docker (optional)',
-      check: () => {
-        try {
-          execSync('docker --version', { encoding: 'utf8', stdio: 'ignore' });
-          return { success: true, message: 'Available' };
-        } catch {
-          return { success: true, message: 'Not available (PostgreSQL needed manually)' };
-        }
-      }
-    }
-  ];
-
-  let allGood = true;
-
-  checks.forEach(({ name, check }) => {
-    const result = check();
-    const icon = result.success ? '✅' : '❌';
-    console.log(`${icon} ${name}: ${result.message}`);
-    if (!result.success) allGood = false;
-  });
-
-  console.log('\n' + '='.repeat(50));
-  
-  if (allGood) {
-    console.log('✅ Setup looks good! Run: npm run dev');
-  } else {
-    console.log('❌ Some issues found. Please fix them and try again.');
-    console.log('\nQuick fix: npm run setup');
-  }
-};
-
-checkSetup();
