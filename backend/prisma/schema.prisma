@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  phone     String?
+  password  String
+  role      String   @default("member") // member, admin
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Family relationship
+  familyId String? @map("family_id")
+  family   Family? @relation(fields: [familyId], references: [id])
+
+  // User activities
+  locations     UserLocation[]
+  expenses      Expense[]        @relation("ExpensePaidBy")
+  recipes       Recipe[]
+  announcements Announcement[]
+  expenseSplits ExpenseSplit[]
+
+  @@map("users")
+}
+
+model Family {
+  id         String   @id @default(cuid())
+  name       String
+  familyCode String   @unique @map("family_code")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Family relationships
+  members       User[]
+  safeZones     SafeZone[]
+  expenses      Expense[]
+  recipes       Recipe[]
+  announcements Announcement[]
+
+  @@map("families")
+}
+
+model UserLocation {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  latitude  Float
+  longitude Float
+  address   String?
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_locations")
+}
+
+model SafeZone {
+  id        String   @id @default(cuid())
+  familyId  String   @map("family_id")
+  name      String
+  latitude  Float
+  longitude Float
+  radius    Int      @default(200) // radius in meters
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("safe_zones")
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  familyId    String   @map("family_id")
+  paidById    String   @map("paid_by_id")
+  amount      Float
+  description String
+  category    String?
+  date        DateTime @default(now())
+  receiptUrl  String?  @map("receipt_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  paidBy User   @relation("ExpensePaidBy", fields: [paidById], references: [id])
+  splits ExpenseSplit[]
+
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id        String  @id @default(cuid())
+  expenseId String  @map("expense_id")
+  userId    String  @map("user_id")
+  amount    Float
+  paid      Boolean @default(false)
+
+  // Relationships
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, userId])
+  @@map("expense_splits")
+}
+
+model Recipe {
+  id           String   @id @default(cuid())
+  familyId     String   @map("family_id")
+  createdById  String   @map("created_by_id")
+  title        String
+  description  String?
+  prepTime     Int?     @map("prep_time") // in minutes
+  cookTime     Int?     @map("cook_time") // in minutes
+  servings     Int?
+  imageUrl     String?  @map("image_url")
+  ingredients  Json
+  instructions Json
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  family    Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy User   @relation(fields: [createdById], references: [id])
+
+  @@map("recipes")
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  familyId  String   @map("family_id")
+  authorId  String   @map("author_id")
+  title     String
+  content   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
+
+  @@map("announcements")
+}
