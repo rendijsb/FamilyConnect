@@ -3,13 +3,21 @@ import { LogBox, StatusBar, StyleSheet, Platform, Alert, AppState, AppStateStatu
 import { NavigationContainer, DefaultTheme, NavigationContainerRef } from '@react-navigation/native';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
-import NetInfo from '@react-native-community/netinfo';
 import { store, persistor } from './src/store';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { LoadingScreen } from './src/components/common/LoadingScreen';
 import { ErrorBoundary } from './src/components/common/ErrorBoundary';
 import { ThemeProvider } from './src/constants/theme';
 import { colors } from './src/constants/theme';
+
+// Safe NetInfo import with error handling
+let NetInfo: any = null;
+try {
+    NetInfo = require('@react-native-community/netinfo').default;
+} catch (error) {
+    console.warn('NetInfo not available:', error);
+}
+
 const navigationRef = React.createRef<NavigationContainerRef<any>>();
 
 LogBox.ignoreLogs([
@@ -28,6 +36,7 @@ LogBox.ignoreLogs([
     'Require cycle:', // React Navigation warning
     '[Reanimated]', // Reanimated warnings
     'ViewPropTypes will be removed', // Deprecated ViewPropTypes warning
+    'NativeModule.RNCNetInfo is null', // NetInfo warning
 ]);
 
 // Custom navigation theme
@@ -51,26 +60,39 @@ function App(): React.JSX.Element {
     useEffect(() => {
         console.log('🚀 FamilyConnect App Starting...');
 
-        // Network connectivity monitoring
-        const unsubscribeNetInfo = NetInfo.addEventListener(state => {
-            console.log('🌐 Network state changed:', {
-                isConnected: state.isConnected,
-                type: state.type,
-                isInternetReachable: state.isInternetReachable
-            });
+        // Network connectivity monitoring with error handling
+        let unsubscribeNetInfo: (() => void) | null = null;
 
-            const connected = state.isConnected && state.isInternetReachable;
-            setIsConnected(connected ?? false);
+        if (NetInfo) {
+            try {
+                unsubscribeNetInfo = NetInfo.addEventListener((state: { isConnected: any; type: any; isInternetReachable: any; }) => {
+                    console.log('🌐 Network state changed:', {
+                        isConnected: state.isConnected,
+                        type: state.type,
+                        isInternetReachable: state.isInternetReachable
+                    });
 
-            // Show alert when connection is lost
-            if (!connected && isConnected) {
-                Alert.alert(
-                    'No Internet Connection',
-                    'Please check your internet connection and try again.',
-                    [{ text: 'OK' }]
-                );
+                    const connected = state.isConnected && state.isInternetReachable;
+                    setIsConnected(connected ?? false);
+
+                    // Show alert when connection is lost
+                    if (!connected && isConnected) {
+                        Alert.alert(
+                            'No Internet Connection',
+                            'Please check your internet connection and try again.',
+                            [{ text: 'OK' }]
+                        );
+                    }
+                });
+            } catch (error) {
+                console.warn('Failed to setup NetInfo listener:', error);
+                // Fallback: assume connected
+                setIsConnected(true);
             }
-        });
+        } else {
+            console.warn('NetInfo not available, assuming connected');
+            setIsConnected(true);
+        }
 
         // App state monitoring
         const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -91,7 +113,9 @@ function App(): React.JSX.Element {
 
         // Cleanup
         return () => {
-            unsubscribeNetInfo();
+            if (unsubscribeNetInfo) {
+                unsubscribeNetInfo();
+            }
             appStateSubscription?.remove();
         };
     }, [isConnected, appState]);

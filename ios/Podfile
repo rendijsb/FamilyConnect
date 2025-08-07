@@ -23,6 +23,7 @@ target 'FamilyConnectMobile' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
+  # Explicitly add NetInfo pod
   pod 'react-native-netinfo', :path => '../node_modules/@react-native-community/netinfo'
 
   post_install do |installer|
@@ -33,5 +34,12 @@ target 'FamilyConnectMobile' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Fix for NetInfo and other pods
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+      end
+    end
   end
 end
