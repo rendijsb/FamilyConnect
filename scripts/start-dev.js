@@ -194,8 +194,8 @@ const startBackend = () => {
 // Start Metro bundler
 const startMetro = () => {
   log('green', '📱 Starting Metro bundler...');
-  
-  const metroProcess = spawn('npx', ['react-native', 'start'], {
+
+  const metroProcess = spawn('npm', ['start'], {
     stdio: 'pipe',
     shell: isWindows,
     detached: !isWindows

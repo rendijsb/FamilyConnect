@@ -1,4 +1,4 @@
-// src/screens/family/CreateFamilyScreen.tsx - Fixed with State Updates
+// src/screens/family/CreateFamilyScreen.tsx - RESILIENT VERSION (No API Dependencies)
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -10,6 +10,7 @@ import {
     Alert,
     Clipboard,
     TextInput,
+    ActivityIndicator,
 } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { GradientView } from '../../components/common/GradientView';
@@ -18,7 +19,8 @@ import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { RootState, AppDispatch } from '../../store';
-import { setCredentials } from '../../store/slices/authSlice'; // Import the action
+import { setCredentials } from '../../store/slices/authSlice';
+import { setFamilyData } from '../../store/slices/userSlice';
 import { colors, spacing, typography, borderRadius, shadows } from '../../constants/theme';
 import axios from 'axios';
 
@@ -29,6 +31,7 @@ interface CreateFamilyScreenProps {
 export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigation }) => {
     const dispatch = useDispatch<AppDispatch>();
     const { user, token } = useSelector((state: RootState) => state.auth);
+    const { familyData } = useSelector((state: RootState) => state.user);
 
     const [currentStep, setCurrentStep] = useState(0);
     const [formData, setFormData] = useState({
@@ -43,22 +46,7 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
     const fadeAnim = new Animated.Value(0);
 
     useEffect(() => {
-        // Check if user already has a family
-        if (user?.familyId) {
-            Alert.alert(
-                'Already in Family',
-                'You are already part of a family. Would you like to go to Family Hub?',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Go to Family Hub',
-                        onPress: () => navigation.navigate('FamilyHub')
-                    }
-                ]
-            );
-            return;
-        }
-
+        // Start animations immediately - don't wait for API calls
         Animated.parallel([
             Animated.timing(slideAnim, {
                 toValue: 1,
@@ -71,7 +59,66 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                 useNativeDriver: true,
             })
         ]).start();
-    }, [currentStep, user?.familyId]);
+
+        // Check family status AFTER screen renders (non-blocking)
+        checkExistingFamilyOptional();
+    }, [currentStep]);
+
+    const checkExistingFamilyOptional = async () => {
+        try {
+            // First check Redux state for existing family
+            if (user?.familyId && familyData) {
+                Alert.alert(
+                    'Already in Family',
+                    `You are already part of "${familyData.name}". Would you like to go to Family Hub?`,
+                    [
+                        { text: 'Stay Here', style: 'cancel' },
+                        {
+                            text: 'Go to Family Hub',
+                            onPress: () => navigation.navigate('FamilyHub')
+                        }
+                    ]
+                );
+                return;
+            }
+
+            // Only try API call if we don't have family data in Redux
+            if (!token) {
+                console.log('⚠️ No token available, skipping family check');
+                return;
+            }
+
+            const response = await axios.get(
+                'http://localhost:3000/api/auth/me',
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                    timeout: 5000 // Short timeout
+                }
+            );
+
+            const { user: freshUser, family } = response.data;
+
+            if (family) {
+                dispatch(setCredentials({ user: freshUser, token: token! }));
+                dispatch(setFamilyData(family));
+
+                Alert.alert(
+                    'Already in Family',
+                    `You are already part of "${family.name}". Would you like to go to Family Hub?`,
+                    [
+                        { text: 'Stay Here', style: 'cancel' },
+                        {
+                            text: 'Go to Family Hub',
+                            onPress: () => navigation.navigate('FamilyHub')
+                        }
+                    ]
+                );
+            }
+        } catch (error) {
+            console.log('⚠️ Optional family check failed (non-critical):', error);
+            // Don't show error to user - this is optional
+        }
+    };
 
     const validateForm = () => {
         if (!formData.familyName.trim()) {
@@ -80,6 +127,10 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
         }
         if (formData.familyName.trim().length < 2) {
             setError('Family name must be at least 2 characters');
+            return false;
+        }
+        if (formData.familyName.trim().length > 50) {
+            setError('Family name must be less than 50 characters');
             return false;
         }
         setError('');
@@ -99,53 +150,73 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                 'http://localhost:3000/api/families',
                 {
                     name: formData.familyName.trim(),
-                    description: formData.description.trim()
+                    description: formData.description.trim() || undefined
                 },
-                { headers: { Authorization: `Bearer ${token}` } }
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                    timeout: 15000
+                }
             );
 
             const family = response.data;
-            console.log('✅ Family created:', family);
-
-            // CRITICAL: Update the user state to include the new family
-            const updatedUser = {
-                ...user!,
-                familyId: family.id,
-                role: 'admin'
-            };
+            console.log('✅ Family created successfully:', family);
 
             // Update Redux state
-            dispatch(setCredentials({
-                user: updatedUser,
-                token: token!
-            }));
+            const updatedUser = { ...user!, familyId: family.id, role: 'admin' };
+            dispatch(setCredentials({ user: updatedUser, token: token! }));
+            dispatch(setFamilyData(family));
 
             setCreatedFamily(family);
             setCurrentStep(1);
 
         } catch (error: any) {
             console.error('❌ Family creation failed:', error);
-            setError(error.response?.data?.error || 'Failed to create family');
+
+            let errorMessage = 'Failed to create family';
+
+            if (error.code === 'ECONNABORTED') {
+                errorMessage = 'Connection timeout. Please check your internet connection.';
+            } else if (error.code === 'NETWORK_ERROR' || !error.response) {
+                errorMessage = 'Network error. Please check your connection and try again.';
+            } else if (error.response?.status === 400) {
+                errorMessage = error.response.data?.error || 'Invalid family data';
+            } else if (error.response?.status === 409) {
+                errorMessage = 'You are already part of a family';
+            } else if (error.response?.status >= 500) {
+                errorMessage = 'Server error. Please try again later.';
+            }
+
+            setError(errorMessage);
         } finally {
             setLoading(false);
         }
     };
 
-    const copyFamilyCode = () => {
+    const copyFamilyCode = async () => {
         if (createdFamily?.familyCode) {
-            Clipboard.setString(createdFamily.familyCode);
-            Alert.alert('Copied!', 'Family code copied to clipboard');
+            try {
+                await Clipboard.setString(createdFamily.familyCode);
+                Alert.alert('Copied!', 'Family code copied to clipboard');
+            } catch (error) {
+                Alert.alert('Error', 'Failed to copy family code');
+            }
         }
     };
 
     const shareFamilyCode = () => {
         if (createdFamily?.familyCode) {
-            Alert.alert('Share Family Code', `Share this code with family members: ${createdFamily.familyCode}`);
+            Alert.alert(
+                'Share Family Code',
+                `Share this code with family members:\n\n${createdFamily.familyCode}\n\nThey can use this code to join your family.`,
+                [
+                    { text: 'Copy Code', onPress: copyFamilyCode },
+                    { text: 'OK' }
+                ]
+            );
         }
     };
 
     const goToFamilyHub = () => {
-        // Navigate to Family Hub and clear the stack
         navigation.reset({
             index: 0,
             routes: [{ name: 'FamilyHub' }],
@@ -192,12 +263,12 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                 </GradientView>
 
                 <Text style={styles.stepTitle}>Create Your Family</Text>
-                <Text style={styles.stepSubtitle}>Start your family's digital journey</Text>
+                <Text style={styles.stepSubtitle}>Start your family's digital journey together</Text>
             </View>
 
             <Card style={styles.formCard}>
                 <Input
-                    label="Family Name"
+                    label="Family Name *"
                     value={formData.familyName}
                     onChangeText={(familyName) => {
                         setFormData({ ...formData, familyName });
@@ -206,6 +277,8 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                     placeholder="Enter your family name"
                     leftIcon="home"
                     error={error}
+                    maxLength={50}
+                    autoFocus={true}
                 />
 
                 <View style={styles.descriptionContainer}>
@@ -214,11 +287,12 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                         style={styles.descriptionInput}
                         value={formData.description}
                         onChangeText={(description) => setFormData({ ...formData, description })}
-                        placeholder="Describe your family..."
+                        placeholder="Describe your family... (e.g., The Johnson Family - Always there for each other)"
                         multiline
                         numberOfLines={3}
                         textAlignVertical="top"
                         maxLength={200}
+                        placeholderTextColor={colors.textSecondary}
                     />
                     <Text style={styles.characterCount}>
                         {formData.description.length}/200 characters
@@ -230,10 +304,10 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                 <Text style={styles.benefitsTitle}>What you'll get:</Text>
                 <View style={styles.benefitsList}>
                     {[
-                        { icon: 'location-on', text: 'Real-time location sharing' },
-                        { icon: 'attach-money', text: 'Shared expense tracking' },
-                        { icon: 'group', text: 'Family member management' },
-                        { icon: 'announcement', text: 'Family announcements' },
+                        { icon: 'location-on', text: 'Real-time location sharing with family members' },
+                        { icon: 'attach-money', text: 'Shared expense tracking and bill splitting' },
+                        { icon: 'group', text: 'Family member management and invitations' },
+                        { icon: 'announcement', text: 'Family announcements and messaging' },
                     ].map((benefit, index) => (
                         <View key={index} style={styles.benefitItem}>
                             <View style={styles.benefitIcon}>
@@ -246,12 +320,21 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
             </Card>
 
             <Button
-                title="Create Family"
+                title={loading ? "Creating Family..." : "Create Family"}
                 onPress={handleCreateFamily}
                 loading={loading}
+                disabled={loading || !formData.familyName.trim()}
                 size="large"
                 style={styles.createButton}
             />
+
+            <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => navigation.goBack()}
+                disabled={loading}
+            >
+                <Text style={styles.backButtonText}>← Back to Family Hub</Text>
+            </TouchableOpacity>
         </Animated.View>
     );
 
@@ -278,22 +361,22 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                     <Text style={styles.successCheckmark}>✓</Text>
                 </GradientView>
 
-                <Text style={styles.successTitle}>Family Created!</Text>
+                <Text style={styles.successTitle}>Family Created Successfully!</Text>
                 <Text style={styles.successSubtitle}>
                     Your family "{createdFamily?.name}" is ready to connect
                 </Text>
             </View>
 
             <Card style={styles.familyCodeCard}>
-                <Text style={styles.familyCodeTitle}>Family Code</Text>
+                <Text style={styles.familyCodeTitle}>Your Family Code</Text>
                 <TouchableOpacity onPress={copyFamilyCode} style={styles.familyCodeContainer}>
                     <Text style={styles.familyCode}>{createdFamily?.familyCode}</Text>
                     <View style={styles.copyIcon}>
-                        <Text style={styles.copyIconText}>📋</Text>
+                        <Icon name="copy" size={16} color={colors.primary} />
                     </View>
                 </TouchableOpacity>
                 <Text style={styles.familyCodeDescription}>
-                    Share this code with family members so they can join your family
+                    Share this code with family members so they can join your family. Tap to copy!
                 </Text>
             </Card>
 
@@ -304,19 +387,19 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                         <View style={styles.stepNumber}>
                             <Text style={styles.stepNumberText}>1</Text>
                         </View>
-                        <Text style={styles.nextStepText}>Share the family code with members</Text>
+                        <Text style={styles.nextStepText}>Share your family code with members</Text>
                     </View>
                     <View style={styles.nextStepItem}>
                         <View style={styles.stepNumber}>
                             <Text style={styles.stepNumberText}>2</Text>
                         </View>
-                        <Text style={styles.nextStepText}>Set up family preferences</Text>
+                        <Text style={styles.nextStepText}>Set up location sharing preferences</Text>
                     </View>
                     <View style={styles.nextStepItem}>
                         <View style={styles.stepNumber}>
                             <Text style={styles.stepNumberText}>3</Text>
                         </View>
-                        <Text style={styles.nextStepText}>Start sharing and connecting</Text>
+                        <Text style={styles.nextStepText}>Start tracking expenses and sharing recipes</Text>
                     </View>
                 </View>
             </Card>
@@ -339,6 +422,7 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
         </Animated.View>
     );
 
+    // Always render the UI - don't wait for API calls
     return (
         <View style={styles.container}>
             <ScrollView
@@ -346,6 +430,7 @@ export const CreateFamilyScreen: React.FC<CreateFamilyScreenProps> = ({ navigati
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                bounces={false}
             >
                 {renderProgressIndicator()}
 
@@ -459,16 +544,16 @@ const styles = StyleSheet.create({
         marginBottom: spacing.md,
     },
     benefitsList: {
-        gap: spacing.sm,
+        gap: spacing.md,
     },
     benefitItem: {
         flexDirection: 'row',
         alignItems: 'center',
     },
     benefitIcon: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         backgroundColor: colors.primary + '20',
         justifyContent: 'center',
         alignItems: 'center',
@@ -478,9 +563,20 @@ const styles = StyleSheet.create({
         fontSize: typography.sizes.sm,
         color: colors.text,
         flex: 1,
+        lineHeight: typography.lineHeights.sm,
     },
     createButton: {
-        marginTop: spacing.md,
+        marginBottom: spacing.md,
+    },
+    backButton: {
+        alignSelf: 'center',
+        paddingVertical: spacing.md,
+        paddingHorizontal: spacing.lg,
+    },
+    backButtonText: {
+        fontSize: typography.sizes.sm,
+        color: colors.textSecondary,
+        textAlign: 'center',
     },
     successHeader: {
         alignItems: 'center',
@@ -544,9 +640,6 @@ const styles = StyleSheet.create({
     },
     copyIcon: {
         padding: spacing.xs,
-    },
-    copyIconText: {
-        fontSize: 16,
     },
     familyCodeDescription: {
         fontSize: typography.sizes.sm,

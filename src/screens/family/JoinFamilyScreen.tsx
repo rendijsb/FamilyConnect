@@ -1,4 +1,4 @@
-// src/screens/family/JoinFamilyScreen.tsx - Fixed Version
+// src/screens/family/JoinFamilyScreen.tsx - RESILIENT VERSION (No API Dependencies for Rendering)
 import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
@@ -11,12 +11,14 @@ import {
     Alert,
     Keyboard,
 } from 'react-native';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { GradientView } from '../../components/common/GradientView';
 import { Icon } from '../../components/common/Icon';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
-import { RootState } from '../../store';
+import { RootState, AppDispatch } from '../../store';
+import { setCredentials } from '../../store/slices/authSlice';
+import { setFamilyData, setFamilyMembers } from '../../store/slices/userSlice';
 import { colors, spacing, typography, borderRadius, shadows } from '../../constants/theme';
 import axios from 'axios';
 
@@ -25,7 +27,9 @@ interface JoinFamilyScreenProps {
 }
 
 export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }) => {
+    const dispatch = useDispatch<AppDispatch>();
     const { user, token } = useSelector((state: RootState) => state.auth);
+    const { familyData } = useSelector((state: RootState) => state.user);
 
     const [familyCode, setFamilyCode] = useState(['', '', '', '', '', '', '', '']);
     const [loading, setLoading] = useState(false);
@@ -38,6 +42,7 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
     const slideAnim = new Animated.Value(0);
 
     useEffect(() => {
+        // Start animations immediately - don't wait for API calls
         Animated.parallel([
             Animated.timing(fadeAnim, {
                 toValue: 1,
@@ -50,7 +55,66 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                 useNativeDriver: true,
             })
         ]).start();
+
+        // Check family status AFTER screen renders (non-blocking)
+        checkExistingFamilyOptional();
     }, [step]);
+
+    const checkExistingFamilyOptional = async () => {
+        try {
+            // First check Redux state for existing family
+            if (user?.familyId && familyData) {
+                Alert.alert(
+                    'Already in Family',
+                    `You are already part of "${familyData.name}". Would you like to go to Family Hub?`,
+                    [
+                        { text: 'Stay Here', style: 'cancel' },
+                        {
+                            text: 'Go to Family Hub',
+                            onPress: () => navigation.navigate('FamilyHub')
+                        }
+                    ]
+                );
+                return;
+            }
+
+            // Only try API call if we don't have family data in Redux
+            if (!token) {
+                console.log('⚠️ No token available, skipping family check');
+                return;
+            }
+
+            const response = await axios.get(
+                'http://localhost:3000/api/auth/me',
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                    timeout: 5000 // Short timeout
+                }
+            );
+
+            const { user: freshUser, family } = response.data;
+
+            if (family) {
+                dispatch(setCredentials({ user: freshUser, token: token! }));
+                dispatch(setFamilyData(family));
+
+                Alert.alert(
+                    'Already in Family',
+                    `You are already part of "${family.name}". Would you like to go to Family Hub?`,
+                    [
+                        { text: 'Stay Here', style: 'cancel' },
+                        {
+                            text: 'Go to Family Hub',
+                            onPress: () => navigation.navigate('FamilyHub')
+                        }
+                    ]
+                );
+            }
+        } catch (error) {
+            console.log('⚠️ Optional family check failed (non-critical):', error);
+            // Don't show error to user - this is optional
+        }
+    };
 
     const handleCodeChange = (text: string, index: number) => {
         const newCode = [...familyCode];
@@ -65,6 +129,7 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
 
         // Auto-validate when complete
         if (newCode.every(char => char !== '') && newCode.join('').length === 8) {
+            Keyboard.dismiss();
             validateFamilyCode(newCode.join(''));
         }
     };
@@ -85,21 +150,38 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
         setError('');
 
         try {
-            // Check if family exists (mock API call)
+            console.log('🔍 Validating family code:', code);
+
             const response = await axios.get(
                 `http://localhost:3000/api/families/validate/${code}`,
-                { headers: { Authorization: `Bearer ${token}` } }
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                    timeout: 10000
+                }
             );
 
+            console.log('✅ Family found:', response.data);
             setFamilyInfo(response.data);
             setStep('preview');
 
         } catch (error: any) {
-            if (error.response?.status === 404) {
-                setError('Family not found. Please check your code.');
-            } else {
-                setError('Unable to validate family code. Please try again.');
+            console.error('❌ Family validation failed:', error);
+
+            let errorMessage = 'Unable to validate family code';
+
+            if (error.code === 'ECONNABORTED') {
+                errorMessage = 'Connection timeout. Please check your internet connection.';
+            } else if (error.code === 'NETWORK_ERROR' || !error.response) {
+                errorMessage = 'Network error. Please check your connection and try again.';
+            } else if (error.response?.status === 404) {
+                errorMessage = 'Family not found. Please check your code and try again.';
+            } else if (error.response?.status === 400) {
+                errorMessage = 'Invalid family code format.';
+            } else if (error.response?.status >= 500) {
+                errorMessage = 'Server error. Please try again later.';
             }
+
+            setError(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -107,20 +189,70 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
 
     const joinFamily = async () => {
         setLoading(true);
+        setError('');
+
         try {
+            console.log('🤝 Joining family with code:', familyCode.join(''));
+
             const response = await axios.post(
                 'http://localhost:3000/api/families/join',
                 { familyCode: familyCode.join('') },
-                { headers: { Authorization: `Bearer ${token}` } }
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                    timeout: 10000
+                }
             );
+
+            console.log('✅ Successfully joined family:', response.data);
+
+            // Update Redux state
+            const updatedUser = { ...user!, familyId: familyInfo.id, role: 'member' };
+            dispatch(setCredentials({ user: updatedUser, token: token! }));
+
+            const updatedFamilyInfo = {
+                ...familyInfo,
+                memberCount: familyInfo.memberCount + 1,
+                members: [...(familyInfo.members || []), updatedUser]
+            };
+
+            dispatch(setFamilyData(updatedFamilyInfo));
+            dispatch(setFamilyMembers(updatedFamilyInfo.members));
 
             setStep('success');
 
         } catch (error: any) {
-            setError(error.response?.data?.error || 'Failed to join family');
+            console.error('❌ Failed to join family:', error);
+
+            let errorMessage = 'Failed to join family';
+
+            if (error.code === 'ECONNABORTED') {
+                errorMessage = 'Connection timeout. Please try again.';
+            } else if (error.code === 'NETWORK_ERROR' || !error.response) {
+                errorMessage = 'Network error. Please check your connection.';
+            } else if (error.response?.status === 400) {
+                errorMessage = error.response.data?.error || 'Invalid request. You may already be in a family.';
+            } else if (error.response?.status === 404) {
+                errorMessage = 'Family not found or no longer exists.';
+            } else if (error.response?.status === 409) {
+                errorMessage = 'You are already part of a family.';
+            } else if (error.response?.status >= 500) {
+                errorMessage = 'Server error. Please try again later.';
+            }
+
+            setError(errorMessage);
             setStep('input');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const resetForm = () => {
+        setFamilyCode(['', '', '', '', '', '', '', '']);
+        setError('');
+        setFamilyInfo(null);
+        setStep('input');
+        if (inputRefs.current[0]) {
+            inputRefs.current[0]?.focus();
         }
     };
 
@@ -175,15 +307,16 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                             textAlign="center"
                             placeholder="•"
                             placeholderTextColor={colors.border}
+                            editable={!loading}
                         />
                     ))}
                 </View>
 
                 {error ? (
-                    <Animated.View style={styles.errorContainer}>
+                    <View style={styles.errorContainer}>
                         <Icon name="error" size={16} color={colors.error} />
                         <Text style={styles.errorText}>{error}</Text>
-                    </Animated.View>
+                    </View>
                 ) : null}
 
                 {loading && (
@@ -191,6 +324,15 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                         <Text style={styles.loadingText}>Validating code...</Text>
                     </View>
                 )}
+
+                <Button
+                    title="Clear Code"
+                    variant="outline"
+                    size="small"
+                    onPress={resetForm}
+                    disabled={loading || familyCode.every(char => char === '')}
+                    style={styles.clearButton}
+                />
             </Card>
 
             <Card style={styles.helpCard}>
@@ -213,6 +355,7 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                 <TouchableOpacity
                     style={styles.createFamilyLink}
                     onPress={() => navigation.navigate('CreateFamily')}
+                    disabled={loading}
                 >
                     <Text style={styles.createFamilyText}>Create New Family Instead</Text>
                 </TouchableOpacity>
@@ -256,7 +399,7 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                     </View>
 
                     <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Members</Text>
+                        <Text style={styles.detailLabel}>Current Members</Text>
                         <Text style={styles.detailValue}>{familyInfo?.memberCount || 0} members</Text>
                     </View>
 
@@ -269,23 +412,31 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                 </View>
 
                 <View style={styles.membersList}>
-                    <Text style={styles.membersTitle}>Current Members</Text>
+                    <Text style={styles.membersTitle}>Family Members</Text>
                     <View style={styles.membersGrid}>
-                        {(familyInfo?.members || []).slice(0, 4).map((member: any, index: number) => (
+                        {(familyInfo?.members || []).slice(0, 6).map((member: any, index: number) => (
                             <View key={member.id} style={styles.memberItem}>
                                 <View style={styles.memberAvatar}>
                                     <Text style={styles.memberInitial}>
                                         {member.name.charAt(0).toUpperCase()}
                                     </Text>
+                                    {member.role === 'admin' && (
+                                        <View style={styles.adminBadge}>
+                                            <Text style={styles.adminText}>★</Text>
+                                        </View>
+                                    )}
                                 </View>
                                 <Text style={styles.memberName}>{member.name.split(' ')[0]}</Text>
+                                {member.role === 'admin' && (
+                                    <Text style={styles.memberRole}>Admin</Text>
+                                )}
                             </View>
                         ))}
-                        {(familyInfo?.memberCount || 0) > 4 && (
+                        {(familyInfo?.memberCount || 0) > 6 && (
                             <View style={styles.memberItem}>
                                 <View style={[styles.memberAvatar, styles.moreMembersAvatar]}>
                                     <Text style={styles.moreMembersText}>
-                                        +{(familyInfo?.memberCount || 0) - 4}
+                                        +{(familyInfo?.memberCount || 0) - 6}
                                     </Text>
                                 </View>
                                 <Text style={styles.memberName}>More</Text>
@@ -297,14 +448,15 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
 
             <View style={styles.actionButtons}>
                 <Button
-                    title="Go Back"
+                    title="← Back"
                     variant="outline"
                     onPress={() => setStep('input')}
                     size="large"
                     style={styles.backButton}
+                    disabled={loading}
                 />
                 <Button
-                    title="Join Family"
+                    title={loading ? "Joining..." : "Join Family"}
                     onPress={joinFamily}
                     loading={loading}
                     size="large"
@@ -348,19 +500,23 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                 <Text style={styles.familyNameLarge}>{familyInfo?.name}</Text>
                 <Text style={styles.welcomeDescription}>
                     Start connecting with your family members through location sharing,
-                    expense tracking, and more.
+                    expense tracking, recipe sharing, and more.
                 </Text>
             </Card>
 
             <Button
                 title="Go to Family Hub"
-                onPress={() => navigation.navigate('FamilyHub')}
+                onPress={() => navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'FamilyHub' }],
+                })}
                 size="large"
                 style={styles.continueButton}
             />
         </Animated.View>
     );
 
+    // Always render the UI - don't wait for API calls
     return (
         <View style={styles.container}>
             <ScrollView
@@ -368,6 +524,7 @@ export const JoinFamilyScreen: React.FC<JoinFamilyScreenProps> = ({ navigation }
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                bounces={false}
             >
                 {step === 'input' && renderCodeInput()}
                 {step === 'preview' && renderFamilyPreview()}
@@ -460,20 +617,26 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: spacing.sm,
+        marginBottom: spacing.md,
     },
     errorText: {
         fontSize: typography.sizes.sm,
         color: colors.error,
         marginLeft: spacing.sm,
+        textAlign: 'center',
+        flex: 1,
     },
     loadingContainer: {
         alignItems: 'center',
-        marginTop: spacing.sm,
+        marginBottom: spacing.md,
     },
     loadingText: {
         fontSize: typography.sizes.sm,
         color: colors.textSecondary,
+    },
+    clearButton: {
+        alignSelf: 'center',
+        paddingHorizontal: spacing.lg,
     },
     helpCard: {
         backgroundColor: colors.surface,
@@ -486,7 +649,7 @@ const styles = StyleSheet.create({
         marginBottom: spacing.md,
     },
     helpList: {
-        gap: spacing.sm,
+        gap: spacing.md,
         marginBottom: spacing.lg,
     },
     helpItem: {
@@ -579,15 +742,37 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: spacing.xs,
+        position: 'relative',
     },
     memberInitial: {
         fontSize: typography.sizes.md,
         fontWeight: typography.weights.bold,
         color: colors.secondary,
     },
+    adminBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: colors.warning,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    adminText: {
+        fontSize: 8,
+        color: colors.secondary,
+        fontWeight: typography.weights.bold,
+    },
     memberName: {
         fontSize: typography.sizes.xs,
         color: colors.text,
+        textAlign: 'center',
+    },
+    memberRole: {
+        fontSize: typography.sizes.xs - 2,
+        color: colors.textSecondary,
         textAlign: 'center',
     },
     moreMembersAvatar: {

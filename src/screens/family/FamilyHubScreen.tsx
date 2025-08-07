@@ -1,5 +1,5 @@
-// src/screens/family/FamilyHubScreen.tsx - Fixed Family State Detection
-import React, { useState, useEffect } from 'react';
+// src/screens/family/FamilyHubScreen.tsx - RESILIENT VERSION (No API Dependencies for Rendering)
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -12,12 +12,14 @@ import {
     Alert,
 } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
+import { useFocusEffect } from '@react-navigation/native';
 import { GradientView } from '../../components/common/GradientView';
 import { Icon } from '../../components/common/Icon';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { RootState, AppDispatch } from '../../store';
 import { setCredentials } from '../../store/slices/authSlice';
+import { setFamilyData, setFamilyMembers } from '../../store/slices/userSlice';
 import { colors, spacing, typography, borderRadius, shadows } from '../../constants/theme';
 import axios from 'axios';
 
@@ -26,24 +28,14 @@ const { width } = Dimensions.get('window');
 export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
     const dispatch = useDispatch<AppDispatch>();
     const { user, token } = useSelector((state: RootState) => state.auth);
-    const { familyMembers } = useSelector((state: RootState) => state.user);
+    const { familyData, familyMembers } = useSelector((state: RootState) => state.user);
 
     const [refreshing, setRefreshing] = useState(false);
-    const [familyData, setFamilyData] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const fadeAnim = new Animated.Value(0);
 
+    // Start animations immediately
     useEffect(() => {
-        console.log('👨‍👩‍👧‍👦 Family Hub - User state:', {
-            userId: user?.id,
-            userName: user?.name,
-            familyId: user?.familyId,
-            role: user?.role
-        });
-
-        // Fetch fresh family data when component mounts
-        fetchFamilyData();
-
         Animated.timing(fadeAnim, {
             toValue: 1,
             duration: 800,
@@ -51,52 +43,84 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
         }).start();
     }, []);
 
-    // Listen for user changes to update family state
-    useEffect(() => {
-        if (user?.familyId) {
-            fetchFamilyData();
-        }
-    }, [user?.familyId]);
+    // Fetch family data when screen comes into focus (optional)
+    useFocusEffect(
+        useCallback(() => {
+            // Only fetch if we have the necessary data
+            if (token && user) {
+                fetchFamilyDataOptional();
+            }
+        }, [user?.familyId, token])
+    );
 
-    const fetchFamilyData = async () => {
-        if (!user?.familyId || !token) {
-            console.log('📝 No family ID or token, showing create family state');
-            setLoading(false);
-            return;
-        }
+    const fetchFamilyDataOptional = async (showLoader = false) => {
+        if (showLoader) setRefreshing(true);
+        setError(null);
 
         try {
-            console.log('🔄 Fetching family data for familyId:', user.familyId);
+            console.log('🔄 Attempting to fetch family data...');
 
-            // Fetch fresh user data to get family info
+            if (!token) {
+                console.log('⚠️ No token available for family data fetch');
+                return;
+            }
+
+            // Get fresh user data from server
             const userResponse = await axios.get(
                 'http://localhost:3000/api/auth/me',
-                { headers: { Authorization: `Bearer ${token}` } }
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                    timeout: 8000
+                }
             );
 
             const { user: freshUser, family } = userResponse.data;
-            console.log('📊 Fresh family data:', family);
+            console.log('📊 Fresh user data received:', {
+                userId: freshUser.id,
+                familyId: freshUser.familyId,
+                familyName: family?.name
+            });
 
             // Update Redux state with fresh user data
             dispatch(setCredentials({
                 user: freshUser,
-                token: token
+                token: token!
             }));
 
-            setFamilyData(family);
+            if (family) {
+                dispatch(setFamilyData(family));
+                dispatch(setFamilyMembers(family.members || []));
+                console.log('✅ Family data updated successfully');
+            } else {
+                dispatch(setFamilyData(null));
+                dispatch(setFamilyMembers([]));
+                console.log('📝 No family found for user');
+            }
+
         } catch (error: any) {
-            if (error.response?.status === 404) {
-                console.log('👤 User not in any family');
+            console.log('⚠️ Family data fetch failed (non-critical):', error.message);
+
+            // Only show error for user-initiated refreshes
+            if (showLoader) {
+                let errorMessage = 'Unable to refresh family data';
+
+                if (error.code === 'ECONNABORTED') {
+                    errorMessage = 'Connection timeout. Please try again.';
+                } else if (error.code === 'NETWORK_ERROR' || !error.response) {
+                    errorMessage = 'Network error. Check your connection.';
+                } else if (error.response?.status >= 500) {
+                    errorMessage = 'Server error. Please try again later.';
+                }
+
+                setError(errorMessage);
             }
         } finally {
-            setLoading(false);
+            if (showLoader) setRefreshing(false);
         }
     };
 
     const onRefresh = async () => {
-        setRefreshing(true);
-        await fetchFamilyData();
-        setRefreshing(false);
+        await fetchFamilyDataOptional(true);
     };
 
     const handleQuickAction = (action: string) => {
@@ -114,7 +138,11 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
                 Alert.alert('Announcement', 'Announcements will be available soon!');
                 break;
             case 'invite':
-                navigation.navigate('FamilyMembers');
+                if (user?.familyId) {
+                    navigation.navigate('FamilyMembers');
+                } else {
+                    Alert.alert('No Family', 'Please create or join a family first.');
+                }
                 break;
             default:
                 Alert.alert('Coming Soon', 'This feature will be available soon!');
@@ -122,7 +150,10 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
     };
 
     const renderFamilyHeader = () => {
-        const hasFamily = user?.familyId && familyData;
+        // Use Redux state for family info (fallback to user data)
+        const hasFamily = user?.familyId && (familyData || user.familyId);
+        const displayFamilyName = familyData?.name || 'Your Family';
+        const memberCount = familyData?.members?.length || familyMembers?.length || 1;
 
         return (
             <GradientView
@@ -146,15 +177,15 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
 
                     {hasFamily ? (
                         <View style={styles.familyInfo}>
-                            <Text style={styles.familyName}>{familyData.name}</Text>
+                            <Text style={styles.familyName}>{displayFamilyName}</Text>
                             <View style={styles.familyStats}>
                                 <View style={styles.statItem}>
-                                    <Text style={styles.statNumber}>{familyData.members?.length || 0}</Text>
+                                    <Text style={styles.statNumber}>{memberCount}</Text>
                                     <Text style={styles.statLabel}>Members</Text>
                                 </View>
                                 <View style={styles.statDivider} />
                                 <View style={styles.statItem}>
-                                    <Text style={styles.statNumber}>{familyData.members?.filter((m: any) => m.id !== user.id).length || 0}</Text>
+                                    <Text style={styles.statNumber}>{Math.max(0, memberCount - 1)}</Text>
                                     <Text style={styles.statLabel}>Others</Text>
                                 </View>
                                 <View style={styles.statDivider} />
@@ -175,7 +206,7 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
     };
 
     const renderQuickActions = () => {
-        const hasFamily = user?.familyId && familyData;
+        const hasFamily = user?.familyId && (familyData || user.familyId);
 
         return (
             <View style={styles.quickActionsContainer}>
@@ -208,7 +239,8 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
     };
 
     const renderFamilyMembers = () => {
-        const hasFamily = user?.familyId && familyData;
+        const hasFamily = user?.familyId && (familyData || user.familyId);
+        const members = familyData?.members || familyMembers || [];
 
         return (
             <Card style={styles.membersCard}>
@@ -223,28 +255,43 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
 
                 {hasFamily ? (
                     <View style={styles.membersGrid}>
-                        {[...familyData.members.slice(0, 6), { id: 'add', name: 'Add Member' }].map((member: any, index: number) => (
+                        {/* Show current user first */}
+                        <TouchableOpacity style={styles.memberItem}>
+                            <View style={styles.memberAvatar}>
+                                <Text style={styles.memberInitial}>
+                                    {user?.name?.charAt(0).toUpperCase() || 'U'}
+                                </Text>
+                                <View style={[styles.onlineIndicator, { backgroundColor: colors.primary }]} />
+                            </View>
+                            <Text style={styles.memberName} numberOfLines={1}>
+                                {user?.name?.split(' ')[0] || 'You'} (You)
+                            </Text>
+                        </TouchableOpacity>
+
+                        {/* Show other family members */}
+                        {members.filter(m => m.id !== user?.id).slice(0, 4).map((member: any, index: number) => (
                             <TouchableOpacity key={member.id || index} style={styles.memberItem}>
-                                {member.id === 'add' ? (
-                                    <View style={[styles.memberAvatar, styles.addMemberAvatar]}>
-                                        <Text style={styles.addMemberText}>+</Text>
-                                    </View>
-                                ) : (
-                                    <View style={styles.memberAvatar}>
-                                        <Text style={styles.memberInitial}>
-                                            {member.name.charAt(0).toUpperCase()}
-                                        </Text>
-                                        {member.id === user?.id && (
-                                            <View style={[styles.onlineIndicator, { backgroundColor: colors.primary }]} />
-                                        )}
-                                    </View>
-                                )}
+                                <View style={styles.memberAvatar}>
+                                    <Text style={styles.memberInitial}>
+                                        {member.name?.charAt(0).toUpperCase() || 'M'}
+                                    </Text>
+                                </View>
                                 <Text style={styles.memberName} numberOfLines={1}>
-                                    {member.id === 'add' ? 'Add' : member.name.split(' ')[0]}
-                                    {member.id === user?.id && ' (You)'}
+                                    {member.name?.split(' ')[0] || 'Member'}
                                 </Text>
                             </TouchableOpacity>
                         ))}
+
+                        {/* Add member button */}
+                        <TouchableOpacity
+                            style={styles.memberItem}
+                            onPress={() => handleQuickAction('invite')}
+                        >
+                            <View style={[styles.memberAvatar, styles.addMemberAvatar]}>
+                                <Text style={styles.addMemberText}>+</Text>
+                            </View>
+                            <Text style={styles.memberName} numberOfLines={1}>Add</Text>
+                        </TouchableOpacity>
                     </View>
                 ) : (
                     <View style={styles.noMembersContainer}>
@@ -290,8 +337,10 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
                                 <Icon name="group" size={16} color={colors.success} />
                             </View>
                             <View style={styles.activityContent}>
-                                <Text style={styles.activityText}>Welcome to {familyData?.name || 'your family'}!</Text>
-                                <Text style={styles.activityTime}>Just now</Text>
+                                <Text style={styles.activityText}>
+                                    Welcome to {familyData?.name || 'your family'}!
+                                </Text>
+                                <Text style={styles.activityTime}>Active family member</Text>
                             </View>
                         </View>
                         {user?.role === 'admin' && (
@@ -301,7 +350,7 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
                                 </View>
                                 <View style={styles.activityContent}>
                                     <Text style={styles.activityText}>You are the family admin</Text>
-                                    <Text style={styles.activityTime}>You can invite and manage members</Text>
+                                    <Text style={styles.activityTime}>Manage members and settings</Text>
                                 </View>
                             </View>
                         )}
@@ -321,24 +370,46 @@ export const FamilyHubScreen: React.FC = ({ navigation }: any) => {
         </Card>
     );
 
-    if (loading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <Text style={styles.loadingText}>Loading family data...</Text>
-            </View>
-        );
-    }
+    const renderErrorBanner = () => {
+        if (!error) return null;
 
+        return (
+            <Card style={styles.errorCard}>
+                <View style={styles.errorContent}>
+                    <Icon name="error" size={20} color={colors.error} />
+                    <View style={styles.errorTextContainer}>
+                        <Text style={styles.errorText}>{error}</Text>
+                        <TouchableOpacity
+                            onPress={() => fetchFamilyDataOptional(true)}
+                            style={styles.retryButton}
+                        >
+                            <Text style={styles.retryText}>Try Again</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Card>
+        );
+    };
+
+    // Always render the UI - use fallback data from Redux state
     return (
         <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
             <ScrollView
                 style={styles.scrollView}
                 contentContainerStyle={styles.scrollContent}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor={colors.primary}
+                        colors={[colors.primary]}
+                    />
+                }
                 showsVerticalScrollIndicator={false}
             >
                 {renderFamilyHeader()}
                 <View style={styles.content}>
+                    {renderErrorBanner()}
                     {renderQuickActions()}
                     {renderFamilyMembers()}
                     {renderRecentActivity()}
@@ -352,16 +423,6 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.background,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: colors.background,
-    },
-    loadingText: {
-        fontSize: typography.sizes.md,
-        color: colors.textSecondary,
     },
     scrollView: {
         flex: 1,
@@ -459,6 +520,32 @@ const styles = StyleSheet.create({
     content: {
         paddingHorizontal: spacing.lg,
         paddingTop: spacing.lg,
+    },
+    errorCard: {
+        marginBottom: spacing.md,
+        backgroundColor: colors.error + '10',
+        borderColor: colors.error + '30',
+    },
+    errorContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    errorTextContainer: {
+        flex: 1,
+        marginLeft: spacing.md,
+    },
+    errorText: {
+        fontSize: typography.sizes.sm,
+        color: colors.error,
+        marginBottom: spacing.xs,
+    },
+    retryButton: {
+        alignSelf: 'flex-start',
+    },
+    retryText: {
+        fontSize: typography.sizes.sm,
+        color: colors.primary,
+        fontWeight: typography.weights.medium,
     },
     quickActionsContainer: {
         marginBottom: spacing.xl,
