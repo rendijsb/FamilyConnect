@@ -1,4 +1,4 @@
-// src/screens/auth/RegisterScreen.tsx
+// src/screens/auth/RegisterScreen.tsx - Bulletproof Version
 import React, { useState } from 'react';
 import {
     View,
@@ -9,6 +9,8 @@ import {
     Platform,
     ScrollView,
     Alert,
+    Keyboard,
+    TouchableWithoutFeedback,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -37,8 +39,6 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
     });
 
     const [errors, setErrors] = useState<{ [key: string]: string }>({});
-    const [showPassword, setShowPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
     const validateForm = () => {
         const newErrors: { [key: string]: string } = {};
@@ -69,16 +69,11 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
         return Object.keys(newErrors).length === 0;
     };
 
-    // Add this to your RegisterScreen.tsx handleRegister function
     const handleRegister = async () => {
-        if (!validateForm()) return;
+        // Dismiss keyboard first
+        Keyboard.dismiss();
 
-        console.log('📤 Sending registration data:', {
-            name: formData.name.trim(),
-            email: formData.email.toLowerCase(),
-            phone: formData.phone.trim() || undefined,
-            familyCode: formData.familyCode.trim() || undefined,
-        });
+        if (!validateForm()) return;
 
         try {
             const userData = {
@@ -89,131 +84,171 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
                 familyCode: formData.familyCode.trim() || undefined,
             };
 
-            console.log('🚀 Dispatching register action...');
-            const result = await dispatch(registerUser(userData)).unwrap();
-            console.log('✅ Registration successful:', result);
-
+            console.log('📝 Attempting registration for:', userData.email);
+            await dispatch(registerUser(userData)).unwrap();
+            console.log('✅ Registration successful');
         } catch (error: any) {
-            console.log('🔴 Registration Rejected:', error);
+            console.error('❌ Registration failed:', error);
+            Alert.alert('Registration Failed', error || 'Please try again.');
+        }
+    };
 
-            let errorMessage = 'Registration failed';
+    const dismissKeyboard = () => {
+        Keyboard.dismiss();
+    };
 
-            if (error.includes('Network Error')) {
-                errorMessage = 'Cannot connect to server. Please check if the backend is running.';
-            } else if (error.includes('timeout')) {
-                errorMessage = 'Request timed out. Please try again.';
-            } else {
-                errorMessage = error || 'Registration failed';
-            }
-
-            Alert.alert('Registration Failed', errorMessage);
+    const clearError = (field: string) => {
+        if (errors[field]) {
+            setErrors({ ...errors, [field]: '' });
         }
     };
 
     return (
-        <SafeAreaView style={registerStyles.container}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={registerStyles.keyboardAvoid}
-            >
-                <ScrollView contentContainerStyle={registerStyles.scrollContent}>
-                    <View style={registerStyles.content}>
-                        <View style={registerStyles.header}>
-                            <Text style={registerStyles.title}>Create Account</Text>
-                            <Text style={registerStyles.subtitle}>Join FamilyConnect today</Text>
-                        </View>
+        <SafeAreaView style={styles.container}>
+            <TouchableWithoutFeedback onPress={dismissKeyboard}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.keyboardAvoid}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+                >
+                    <ScrollView
+                        contentContainerStyle={styles.scrollContent}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                        bounces={false}
+                    >
+                        <View style={styles.content}>
+                            <View style={styles.header}>
+                                <Text style={styles.title}>Create Account</Text>
+                                <Text style={styles.subtitle}>Join FamilyConnect today</Text>
+                            </View>
 
-                        <View style={registerStyles.form}>
-                            <Input
-                                label="Full Name"
-                                value={formData.name}
-                                onChangeText={(name) => setFormData({ ...formData, name })}
-                                placeholder="Enter your full name"
-                                leftIcon="person"
-                                error={errors.name}
-                            />
+                            <View style={styles.form}>
+                                <Input
+                                    label="Full Name"
+                                    value={formData.name}
+                                    onChangeText={(name) => {
+                                        setFormData({ ...formData, name });
+                                        clearError('name');
+                                    }}
+                                    placeholder="Enter your full name"
+                                    autoComplete="name"
+                                    textContentType="name"
+                                    leftIcon="person"
+                                    error={errors.name}
+                                    returnKeyType="next"
+                                />
 
-                            <Input
-                                label="Email"
-                                value={formData.email}
-                                onChangeText={(email) => setFormData({ ...formData, email })}
-                                placeholder="Enter your email"
-                                keyboardType="email-address"
-                                autoCapitalize="none"
-                                leftIcon="email"
-                                error={errors.email}
-                            />
+                                <Input
+                                    label="Email"
+                                    value={formData.email}
+                                    onChangeText={(email) => {
+                                        setFormData({ ...formData, email });
+                                        clearError('email');
+                                    }}
+                                    placeholder="Enter your email"
+                                    keyboardType="email-address"
+                                    autoCapitalize="none"
+                                    autoComplete="email"
+                                    textContentType="emailAddress"
+                                    leftIcon="email"
+                                    error={errors.email}
+                                    returnKeyType="next"
+                                />
 
-                            <Input
-                                label="Phone (Optional)"
-                                value={formData.phone}
-                                onChangeText={(phone) => setFormData({ ...formData, phone })}
-                                placeholder="Enter your phone number"
-                                keyboardType="phone-pad"
-                                leftIcon="phone"
-                            />
+                                <Input
+                                    label="Phone (Optional)"
+                                    value={formData.phone}
+                                    onChangeText={(phone) => {
+                                        setFormData({ ...formData, phone });
+                                        clearError('phone');
+                                    }}
+                                    placeholder="Enter your phone number"
+                                    keyboardType="phone-pad"
+                                    autoComplete="tel"
+                                    textContentType="telephoneNumber"
+                                    leftIcon="phone"
+                                    returnKeyType="next"
+                                />
 
-                            <Input
-                                label="Password"
-                                value={formData.password}
-                                onChangeText={(password) => setFormData({ ...formData, password })}
-                                placeholder="Create a password"
-                                secureTextEntry={!showPassword}
-                                leftIcon="lock"
-                                rightIcon={showPassword ? 'visibility' : 'visibility-off'}
-                                onRightIconPress={() => setShowPassword(!showPassword)}
-                                error={errors.password}
-                            />
+                                <Input
+                                    label="Password"
+                                    value={formData.password}
+                                    onChangeText={(password) => {
+                                        setFormData({ ...formData, password });
+                                        clearError('password');
+                                        clearError('confirmPassword');
+                                    }}
+                                    placeholder="Create a password"
+                                    secureTextEntry={true}
+                                    autoComplete="password-new"
+                                    textContentType="newPassword"
+                                    leftIcon="lock"
+                                    error={errors.password}
+                                    returnKeyType="next"
+                                />
 
-                            <Input
-                                label="Confirm Password"
-                                value={formData.confirmPassword}
-                                onChangeText={(confirmPassword) => setFormData({ ...formData, confirmPassword })}
-                                placeholder="Confirm your password"
-                                secureTextEntry={!showConfirmPassword}
-                                leftIcon="lock"
-                                rightIcon={showConfirmPassword ? 'visibility' : 'visibility-off'}
-                                onRightIconPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                                error={errors.confirmPassword}
-                            />
+                                <Input
+                                    label="Confirm Password"
+                                    value={formData.confirmPassword}
+                                    onChangeText={(confirmPassword) => {
+                                        setFormData({ ...formData, confirmPassword });
+                                        clearError('confirmPassword');
+                                    }}
+                                    placeholder="Confirm your password"
+                                    secureTextEntry={true}
+                                    autoComplete="password-new"
+                                    textContentType="newPassword"
+                                    leftIcon="lock"
+                                    error={errors.confirmPassword}
+                                    returnKeyType="next"
+                                />
 
-                            <Input
-                                label="Family Code (Optional)"
-                                value={formData.familyCode}
-                                onChangeText={(familyCode) => setFormData({ ...formData, familyCode })}
-                                placeholder="Enter family code to join existing family"
-                                autoCapitalize="characters"
-                                leftIcon="group"
-                            />
-                        </View>
-
-                        <View style={registerStyles.buttonContainer}>
-                            <Button
-                                title="Create Account"
-                                onPress={handleRegister}
-                                loading={loading}
-                                size="large"
-                                style={registerStyles.registerButton}
-                            />
-
-                            <View style={registerStyles.loginContainer}>
-                                <Text style={registerStyles.loginText}>Already have an account? </Text>
-                                <Button
-                                    title="Sign In"
-                                    onPress={() => navigation.navigate('Login')}
-                                    variant="outline"
-                                    size="small"
+                                <Input
+                                    label="Family Code (Optional)"
+                                    value={formData.familyCode}
+                                    onChangeText={(familyCode) => {
+                                        setFormData({ ...formData, familyCode });
+                                        clearError('familyCode');
+                                    }}
+                                    placeholder="Enter family code to join existing family"
+                                    autoCapitalize="characters"
+                                    autoComplete="off"
+                                    textContentType="none"
+                                    leftIcon="group"
+                                    returnKeyType="done"
+                                    onSubmitEditing={handleRegister}
                                 />
                             </View>
+
+                            <View style={styles.buttonContainer}>
+                                <Button
+                                    title="Create Account"
+                                    onPress={handleRegister}
+                                    loading={loading}
+                                    size="large"
+                                    style={styles.registerButton}
+                                />
+
+                                <View style={styles.loginContainer}>
+                                    <Text style={styles.loginText}>Already have an account? </Text>
+                                    <Button
+                                        title="Sign In"
+                                        onPress={() => navigation.navigate('Login')}
+                                        variant="outline"
+                                        size="small"
+                                    />
+                                </View>
+                            </View>
                         </View>
-                    </View>
-                </ScrollView>
-            </KeyboardAvoidingView>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
         </SafeAreaView>
     );
 };
 
-const registerStyles = StyleSheet.create({
+const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.background,
@@ -223,12 +258,13 @@ const registerStyles = StyleSheet.create({
     },
     scrollContent: {
         flexGrow: 1,
+        paddingHorizontal: spacing.xl,
+        paddingVertical: spacing.md,
     },
     content: {
         flex: 1,
-        paddingHorizontal: spacing.xl,
         justifyContent: 'space-between',
-        paddingBottom: spacing.xl,
+        minHeight: 700, // Ensure enough space for all fields
     },
     header: {
         alignItems: 'center',
@@ -240,17 +276,22 @@ const registerStyles = StyleSheet.create({
         fontWeight: typography.weights.bold,
         color: colors.text,
         marginBottom: spacing.sm,
+        textAlign: 'center',
     },
     subtitle: {
         fontSize: typography.sizes.md,
         color: colors.textSecondary,
         textAlign: 'center',
+        lineHeight: typography.lineHeights.md,
     },
     form: {
         flex: 1,
+        justifyContent: 'center',
+        marginVertical: spacing.md,
     },
     buttonContainer: {
         gap: spacing.lg,
+        marginBottom: spacing.xl,
     },
     registerButton: {
         marginBottom: spacing.md,
@@ -260,6 +301,7 @@ const registerStyles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         gap: spacing.sm,
+        flexWrap: 'wrap',
     },
     loginText: {
         fontSize: typography.sizes.md,

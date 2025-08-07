@@ -1,3 +1,4 @@
+// src/screens/home/HomeScreen.tsx - Fixed with proper function implementations
 import React, { useEffect, useState } from 'react';
 import {
     View,
@@ -6,15 +7,20 @@ import {
     ScrollView,
     RefreshControl,
     TouchableOpacity,
+    Alert,
 } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { Icon } from '../../components/common/Icon';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { RootState, AppDispatch } from '../../store';
 import { colors, spacing, typography, borderRadius, shadows } from '../../constants/theme';
 
-export const HomeScreen: React.FC = () => {
+interface HomeScreenProps {
+    navigation?: any;
+}
+
+export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const { user } = useSelector((state: RootState) => state.auth);
     const { familyMembers } = useSelector((state: RootState) => state.user);
     const [refreshing, setRefreshing] = useState(false);
@@ -25,11 +31,46 @@ export const HomeScreen: React.FC = () => {
         setTimeout(() => setRefreshing(false), 2000);
     };
 
+    const handleQuickAction = (action: string) => {
+        switch (action) {
+            case 'location':
+                Alert.alert('Location Sharing', 'Location sharing will be available soon!');
+                break;
+            case 'expense':
+                Alert.alert('Add Expense', 'Expense tracking will be available soon!');
+                break;
+            case 'recipe':
+                Alert.alert('Add Recipe', 'Recipe sharing will be available soon!');
+                break;
+            case 'announce':
+                Alert.alert('Announcement', 'Announcements will be available soon!');
+                break;
+            default:
+                Alert.alert('Coming Soon', 'This feature will be available soon!');
+        }
+    };
+
+    const handleCreateFamily = () => {
+        if (navigation) {
+            navigation.navigate('FamilyTab', { screen: 'CreateFamily' });
+        } else {
+            Alert.alert('Create Family', 'Create family feature will be available soon!');
+        }
+    };
+
+    const handleJoinFamily = () => {
+        if (navigation) {
+            navigation.navigate('FamilyTab', { screen: 'JoinFamily' });
+        } else {
+            Alert.alert('Join Family', 'Join family feature will be available soon!');
+        }
+    };
+
     const renderWelcomeCard = () => (
         <Card style={styles.welcomeCard}>
             <View style={styles.welcomeHeader}>
                 <View>
-                    <Text style={styles.welcomeTitle}>Welcome back, {user?.name?.split(' ')[0]}!</Text>
+                    <Text style={styles.welcomeTitle}>Welcome back, {user?.name?.split(' ')[0] || 'User'}!</Text>
                     <Text style={styles.welcomeSubtitle}>
                         {user?.familyId ? 'Your family is staying connected' : 'Create or join a family to get started'}
                     </Text>
@@ -45,28 +86,40 @@ export const HomeScreen: React.FC = () => {
         <Card style={styles.quickActionsCard}>
             <Text style={styles.sectionTitle}>Quick Actions</Text>
             <View style={styles.quickActionsGrid}>
-                <TouchableOpacity style={styles.quickAction}>
+                <TouchableOpacity
+                    style={styles.quickAction}
+                    onPress={() => handleQuickAction('location')}
+                >
                     <View style={[styles.quickActionIcon, { backgroundColor: colors.primary + '20' }]}>
                         <Icon name="location-on" size={24} color={colors.primary} />
                     </View>
                     <Text style={styles.quickActionText}>Share Location</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.quickAction}>
+                <TouchableOpacity
+                    style={styles.quickAction}
+                    onPress={() => handleQuickAction('expense')}
+                >
                     <View style={[styles.quickActionIcon, { backgroundColor: colors.accent + '20' }]}>
                         <Icon name="attach-money" size={24} color={colors.accent} />
                     </View>
                     <Text style={styles.quickActionText}>Add Expense</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.quickAction}>
+                <TouchableOpacity
+                    style={styles.quickAction}
+                    onPress={() => handleQuickAction('recipe')}
+                >
                     <View style={[styles.quickActionIcon, { backgroundColor: colors.success + '20' }]}>
                         <Icon name="restaurant" size={24} color={colors.success} />
                     </View>
                     <Text style={styles.quickActionText}>Add Recipe</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.quickAction}>
+                <TouchableOpacity
+                    style={styles.quickAction}
+                    onPress={() => handleQuickAction('announce')}
+                >
                     <View style={[styles.quickActionIcon, { backgroundColor: colors.warning + '20' }]}>
                         <Icon name="announcement" size={24} color={colors.warning} />
                     </View>
@@ -106,14 +159,14 @@ export const HomeScreen: React.FC = () => {
                         <Text style={styles.familyMembersTitle}>Active Members</Text>
                         {familyMembers.length > 0 ? (
                             familyMembers.slice(0, 3).map((member, index) => (
-                                <View key={member.id} style={styles.familyMember}>
+                                <View key={member.id || index} style={styles.familyMember}>
                                     <View style={styles.memberAvatar}>
                                         <Text style={styles.memberInitial}>
-                                            {member.name.charAt(0).toUpperCase()}
+                                            {member.name?.charAt(0).toUpperCase() || 'U'}
                                         </Text>
                                     </View>
                                     <View style={styles.memberInfo}>
-                                        <Text style={styles.memberName}>{member.name}</Text>
+                                        <Text style={styles.memberName}>{member.name || 'Family Member'}</Text>
                                         <View style={styles.memberStatus}>
                                             <View style={styles.onlineIndicator} />
                                             <Text style={styles.memberStatusText}>Online</Text>
@@ -134,13 +187,18 @@ export const HomeScreen: React.FC = () => {
                         Create a new family or join an existing one to start connecting
                     </Text>
                     <View style={styles.noFamilyButtons}>
-                        <Button title="Create Family" size="small" style={styles.createFamilyButton}
-                                onPress={function (): void {
-                                    throw new Error('Function not implemented.');
-                                }} />
-                        <Button title="Join Family" variant="outline" size="small" onPress={function (): void {
-                            throw new Error('Function not implemented.');
-                        }} />
+                        <Button
+                            title="Create Family"
+                            size="small"
+                            style={styles.createFamilyButton}
+                            onPress={handleCreateFamily}
+                        />
+                        <Button
+                            title="Join Family"
+                            variant="outline"
+                            size="small"
+                            onPress={handleJoinFamily}
+                        />
                     </View>
                 </View>
             )}

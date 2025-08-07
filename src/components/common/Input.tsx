@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// src/components/common/Input.tsx - Bulletproof Version (No Yellow Boxes)
+import React, { useState, useRef } from 'react';
 import {
     View,
     TextInput,
@@ -9,17 +10,17 @@ import {
     TouchableOpacity,
     Platform,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { Icon } from './Icon';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 
-interface InputProps extends TextInputProps {
+interface InputProps extends Omit<TextInputProps, 'style'> {
     label?: string;
     error?: string;
     leftIcon?: string;
     rightIcon?: string;
     onRightIconPress?: () => void;
     containerStyle?: ViewStyle;
-    isPassword?: boolean;
+    style?: ViewStyle;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -30,48 +31,45 @@ export const Input: React.FC<InputProps> = ({
                                                 onRightIconPress,
                                                 containerStyle,
                                                 style,
-                                                isPassword = false,
-                                                secureTextEntry: propSecureTextEntry,
+                                                secureTextEntry,
+                                                autoComplete,
+                                                textContentType,
                                                 ...props
                                             }) => {
     const [isFocused, setIsFocused] = useState(false);
-    const [showPassword, setShowPassword] = useState(false);
+    const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+    const textInputRef = useRef<TextInput>(null);
 
-    const isSecureField = isPassword || propSecureTextEntry;
-    const secureTextEntry = isSecureField && !showPassword;
+    // Handle password visibility for password fields
+    const isPasswordField = secureTextEntry !== undefined;
+    const shouldShowPassword = isPasswordField && isPasswordVisible;
+    const actualSecureTextEntry = isPasswordField && !isPasswordVisible;
 
     const handleRightIconPress = () => {
-        if (isPassword || propSecureTextEntry) {
-            setShowPassword(!showPassword);
+        if (isPasswordField && !onRightIconPress) {
+            // Toggle password visibility
+            setIsPasswordVisible(!isPasswordVisible);
         } else if (onRightIconPress) {
             onRightIconPress();
         }
     };
 
-    const finalRightIcon = (isPassword || propSecureTextEntry)
-        ? (showPassword ? 'visibility-off' : 'visibility')
+    // Determine right icon for password fields
+    const actualRightIcon = isPasswordField && !rightIcon
+        ? (isPasswordVisible ? 'visibility-off' : 'visibility')
         : rightIcon;
 
-    const getAutoCompleteType = () => {
-        if (isPassword || propSecureTextEntry) {
-            return Platform.OS === 'android' ? 'password' : 'password';
-        }
-        if (props.keyboardType === 'email-address') {
-            return 'email';
-        }
+    // Fix autoComplete and textContentType to prevent warnings
+    const getAutoCompleteValue = () => {
+        if (autoComplete !== undefined) return autoComplete;
+        if (isPasswordField) return 'password';
         return 'off';
     };
 
     const getTextContentType = () => {
-        if (Platform.OS === 'ios') {
-            if (isPassword || propSecureTextEntry) {
-                return 'password' as const;
-            }
-            if (props.keyboardType === 'email-address') {
-                return 'emailAddress' as const;
-            }
-        }
-        return 'none' as const;
+        if (textContentType !== undefined) return textContentType;
+        if (isPasswordField) return 'password';
+        return 'none';
     };
 
     return (
@@ -83,27 +81,41 @@ export const Input: React.FC<InputProps> = ({
                 error && styles.error,
             ]}>
                 {leftIcon && (
-                    <Icon name={leftIcon} size={20} color={colors.textSecondary} style={styles.leftIcon} />
+                    <Icon
+                        name={leftIcon}
+                        size={20}
+                        color={colors.textSecondary}
+                        style={styles.leftIcon}
+                    />
                 )}
                 <TextInput
+                    ref={textInputRef}
                     style={[styles.input, style]}
                     onFocus={() => setIsFocused(true)}
                     onBlur={() => setIsFocused(false)}
                     placeholderTextColor={colors.textSecondary}
-                    secureTextEntry={secureTextEntry}
-                    // Fix autocomplete issues
-                    autoComplete={getAutoCompleteType() as any}
-                    textContentType={getTextContentType()}
+                    secureTextEntry={actualSecureTextEntry}
                     autoCorrect={false}
-                    autoCapitalize={isSecureField ? 'none' : props.autoCapitalize}
-                    // Prevent autocomplete yellow line
+                    autoComplete={getAutoCompleteValue()}
+                    textContentType={getTextContentType()}
+                    spellCheck={false}
+                    autoCapitalize={isPasswordField ? 'none' : props.autoCapitalize}
+                    keyboardType={props.keyboardType || 'default'}
+                    returnKeyType={props.returnKeyType || 'done'}
+                    blurOnSubmit={true}
+                    // Prevent warnings
                     importantForAutofill="no"
                     {...props}
                 />
-                {finalRightIcon && (
-                    <TouchableOpacity onPress={handleRightIconPress} style={styles.rightIconContainer}>
+                {actualRightIcon && (
+                    <TouchableOpacity
+                        onPress={handleRightIconPress}
+                        style={styles.rightIconContainer}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
                         <Icon
-                            name={finalRightIcon}
+                            name={actualRightIcon}
                             size={20}
                             color={colors.textSecondary}
                         />
@@ -134,9 +146,6 @@ const styles = StyleSheet.create({
         backgroundColor: colors.surface,
         paddingHorizontal: spacing.md,
         minHeight: 48,
-        // Prevent autocomplete overlay issues
-        position: 'relative',
-        overflow: 'hidden',
     },
     focused: {
         borderColor: colors.primary,
@@ -144,28 +153,24 @@ const styles = StyleSheet.create({
     },
     error: {
         borderColor: colors.error,
+        borderWidth: 2,
     },
     input: {
         flex: 1,
-        paddingVertical: spacing.sm,
+        paddingVertical: Platform.OS === 'ios' ? spacing.md : spacing.sm,
         fontSize: typography.sizes.md,
         color: colors.text,
-        // Fix password input issues
-        textAlignVertical: 'center',
-        includeFontPadding: false,
-        // Additional fixes for autocomplete
-        ...(Platform.OS === 'android' && {
-            fontFamily: 'Roboto',
-        }),
+        minHeight: Platform.OS === 'ios' ? 20 : 40,
+        // Prevent layout shift warnings
+        lineHeight: Platform.OS === 'ios' ? undefined : typography.sizes.md * 1.2,
     },
     leftIcon: {
         marginRight: spacing.sm,
     },
     rightIconContainer: {
-        padding: spacing.xs,
         marginLeft: spacing.sm,
-        justifyContent: 'center',
-        alignItems: 'center',
+        padding: spacing.xs,
+        borderRadius: borderRadius.sm,
     },
     errorText: {
         fontSize: typography.sizes.xs,

@@ -1,3 +1,4 @@
+// src/screens/auth/LoginScreen.tsx - Bulletproof Version
 import React, { useState } from 'react';
 import {
     View,
@@ -8,6 +9,8 @@ import {
     Platform,
     ScrollView,
     Alert,
+    Keyboard,
+    TouchableWithoutFeedback,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -32,7 +35,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     });
 
     const [errors, setErrors] = useState<{ [key: string]: string }>({});
-    const [showPassword, setShowPassword] = useState(false);
 
     const validateForm = () => {
         const newErrors: { [key: string]: string } = {};
@@ -52,83 +54,117 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     };
 
     const handleLogin = async () => {
+        // Dismiss keyboard first
+        Keyboard.dismiss();
+
         if (!validateForm()) return;
 
         try {
+            console.log('🔐 Attempting login for:', formData.email);
             await dispatch(loginUser(formData)).unwrap();
+            console.log('✅ Login successful');
         } catch (error: any) {
+            console.error('❌ Login failed:', error);
             Alert.alert('Login Failed', error || 'Please check your credentials and try again.');
         }
     };
 
+    const dismissKeyboard = () => {
+        Keyboard.dismiss();
+    };
+
     return (
         <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.keyboardAvoid}
-            >
-                <ScrollView contentContainerStyle={styles.scrollContent}>
-                    <View style={styles.content}>
-                        <View style={styles.header}>
-                            <Text style={styles.title}>Welcome Back!</Text>
-                            <Text style={styles.subtitle}>Sign in to continue to FamilyConnect</Text>
-                        </View>
+            <TouchableWithoutFeedback onPress={dismissKeyboard}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.keyboardAvoid}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+                >
+                    <ScrollView
+                        contentContainerStyle={styles.scrollContent}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                        bounces={false}
+                    >
+                        <View style={styles.content}>
+                            <View style={styles.header}>
+                                <Text style={styles.title}>Welcome Back!</Text>
+                                <Text style={styles.subtitle}>Sign in to continue to FamilyConnect</Text>
+                            </View>
 
-                        <View style={styles.form}>
-                            <Input
-                                label="Email"
-                                value={formData.email}
-                                onChangeText={(email) => setFormData({ ...formData, email })}
-                                placeholder="Enter your email"
-                                keyboardType="email-address"
-                                autoCapitalize="none"
-                                leftIcon="email"
-                                error={errors.email}
-                            />
+                            <View style={styles.form}>
+                                <Input
+                                    label="Email"
+                                    value={formData.email}
+                                    onChangeText={(email) => {
+                                        setFormData({ ...formData, email });
+                                        if (errors.email) {
+                                            setErrors({ ...errors, email: '' });
+                                        }
+                                    }}
+                                    placeholder="Enter your email"
+                                    keyboardType="email-address"
+                                    autoCapitalize="none"
+                                    autoComplete="email"
+                                    textContentType="emailAddress"
+                                    leftIcon="email"
+                                    error={errors.email}
+                                    returnKeyType="next"
+                                    blurOnSubmit={false}
+                                />
 
-                            <Input
-                                label="Password"
-                                value={formData.password}
-                                onChangeText={(password) => setFormData({ ...formData, password })}
-                                placeholder="Enter your password"
-                                secureTextEntry={!showPassword}
-                                leftIcon="lock"
-                                rightIcon={showPassword ? 'visibility' : 'visibility-off'}
-                                onRightIconPress={() => setShowPassword(!showPassword)}
-                                error={errors.password}
-                            />
+                                <Input
+                                    label="Password"
+                                    value={formData.password}
+                                    onChangeText={(password) => {
+                                        setFormData({ ...formData, password });
+                                        if (errors.password) {
+                                            setErrors({ ...errors, password: '' });
+                                        }
+                                    }}
+                                    placeholder="Enter your password"
+                                    secureTextEntry={true}
+                                    autoComplete="password"
+                                    textContentType="password"
+                                    leftIcon="lock"
+                                    error={errors.password}
+                                    returnKeyType="done"
+                                    onSubmitEditing={handleLogin}
+                                />
 
-                            <Button
-                                title="Forgot Password?"
-                                onPress={() => navigation.navigate('ForgotPassword')}
-                                variant="outline"
-                                size="small"
-                                style={styles.forgotButton}
-                            />
-                        </View>
-
-                        <View style={styles.buttonContainer}>
-                            <Button
-                                title="Sign In"
-                                onPress={handleLogin}
-                                loading={loading}
-                                size="large"
-                                style={styles.loginButton}
-                            />
-
-                            <View style={styles.signupContainer}>
-                                <Text style={styles.signupText}>Don't have an account? </Text>
                                 <Button
-                                    title="Sign Up"
-                                    onPress={() => navigation.navigate('Register')}
+                                    title="Forgot Password?"
+                                    onPress={() => navigation.navigate('ForgotPassword')}
                                     variant="outline"
                                     size="small"
+                                    style={styles.forgotButton}
                                 />
                             </View>
+
+                            <View style={styles.buttonContainer}>
+                                <Button
+                                    title="Sign In"
+                                    onPress={handleLogin}
+                                    loading={loading}
+                                    size="large"
+                                    style={styles.loginButton}
+                                />
+
+                                <View style={styles.signupContainer}>
+                                    <Text style={styles.signupText}>Don't have an account? </Text>
+                                    <Button
+                                        title="Sign Up"
+                                        onPress={() => navigation.navigate('Register')}
+                                        variant="outline"
+                                        size="small"
+                                    />
+                                </View>
+                            </View>
                         </View>
-                    </View>
-                </ScrollView>
-            </KeyboardAvoidingView>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
         </SafeAreaView>
     );
 };
@@ -143,12 +179,13 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         flexGrow: 1,
+        paddingHorizontal: spacing.xl,
+        paddingVertical: spacing.lg,
     },
     content: {
         flex: 1,
-        paddingHorizontal: spacing.xl,
         justifyContent: 'space-between',
-        paddingBottom: spacing.xl,
+        minHeight: 500, // Ensure enough space
     },
     header: {
         alignItems: 'center',
@@ -160,21 +197,26 @@ const styles = StyleSheet.create({
         fontWeight: typography.weights.bold,
         color: colors.text,
         marginBottom: spacing.sm,
+        textAlign: 'center',
     },
     subtitle: {
         fontSize: typography.sizes.md,
         color: colors.textSecondary,
         textAlign: 'center',
+        lineHeight: typography.lineHeights.md,
     },
     form: {
         flex: 1,
+        justifyContent: 'center',
+        marginVertical: spacing.lg,
     },
     forgotButton: {
         alignSelf: 'flex-end',
-        marginTop: -spacing.sm,
+        marginTop: spacing.sm,
     },
     buttonContainer: {
         gap: spacing.lg,
+        marginBottom: spacing.xl,
     },
     loginButton: {
         marginBottom: spacing.md,
@@ -184,6 +226,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         gap: spacing.sm,
+        flexWrap: 'wrap',
     },
     signupText: {
         fontSize: typography.sizes.md,
